@@ -297,20 +297,12 @@ function goTo(id) {
 
 /* ── JOIN ── */
 function newSession() {
-  // Reset all local state
+  // Reset local state only - do NOT touch Firebase here
   G.allPlayers = [];
   G.botsAdded = false;
   G.score = 0; G.streak = 0; G.currentQ = 0; G.id = null;
   if (G.lobbyOff) { try { G.lobbyOff(); } catch(e){} G.lobbyOff = null; }
-
-  if (window._fbReady) {
-    // Wipe ONLY the lobby (not the whole quizconf node), then proceed
-    window._fbRemove(window._fbRef(window._db, 'quizconf/lobby'))
-      .then(() => goTo('s-name'))
-      .catch(() => goTo('s-name'));
-  } else {
-    goTo('s-name');
-  }
+  goTo('s-name');
 }
 
 function joinGame() {
@@ -586,10 +578,13 @@ function continueAfterLB() {
 function showFinal() {
   const doRender = () => {
     renderLB('final-list', G.allPlayers);
-    if (window._fbReady && G.id) {
-      try { window._fbRemove(window._fbRef(window._db, `quizconf/lobby/${G.id}`)); } catch(e){}
-    }
     goTo('s-final');
+    // Wipe entire lobby after showing final results — next session starts clean
+    if (window._fbReady) {
+      setTimeout(() => {
+        try { window._fbRemove(window._fbRef(window._db, 'quizconf/lobby')); } catch(e){}
+      }, 1500);
+    }
   };
   // Fetch final scores from Firebase
   if (window._fbReady) {
