@@ -378,13 +378,26 @@ function leaveGame() {
 
 /* ── GAME ── */
 function startGame() {
-  // Stop live lobby updates during game
-  if (G.lobbyOff) { try { G.lobbyOff(); } catch(e){} G.lobbyOff = null; }
   G.currentQ = 0; G.score = 0; G.streak = 0; G.botsAdded = false;
   if (!G.allPlayers.find(p => p.id === G.id)) {
     G.allPlayers.unshift({ id: G.id, name: G.name, score:0, streak:0, ts: Date.now() });
   }
   G.allPlayers.forEach(p => { p.score = 0; p.streak = 0; });
+
+  // Reset my score in Firebase and keep listener ACTIVE so scores update live
+  if (window._fbReady && G.id) {
+    try { window._fbSet(window._fbRef(window._db, `quizconf/lobby/${G.id}/score`), 0); } catch(e){}
+    if (!G.lobbyOff) {
+      G.lobbyOff = window._fbOnValue(window._fbRef(window._db,'quizconf/lobby'), snap => {
+        const data = snap.val() || {};
+        Object.entries(data).forEach(([id, fp]) => {
+          const existing = G.allPlayers.find(p => p.id === id);
+          if (existing) { existing.score = fp.score || 0; }
+          else if (!id.startsWith('bot_')) { G.allPlayers.push({ id, ...fp }); }
+        });
+      });
+    }
+  }
   showQuestion();
 }
 
@@ -446,9 +459,12 @@ function selectAnswer(idx) {
     G.score += pts;
     const me = G.allPlayers.find(p => p.id === G.id);
     if (me) { me.score = (me.score||0)+pts; me.streak = (me.streak||0)+1; }
-    // Sync score to Firebase
+    // Sync score + streak to Firebase in real time
     if (window._fbReady && G.id) {
-      try { window._fbSet(window._fbRef(window._db, `quizconf/lobby/${G.id}/score`), G.score); } catch(e){}
+      try {
+        window._fbSet(window._fbRef(window._db, `quizconf/lobby/${G.id}/score`), G.score);
+        window._fbSet(window._fbRef(window._db, `quizconf/lobby/${G.id}/streak`), G.streak);
+      } catch(e){}
     }
   } else {
     G.streak = 0;
@@ -503,10 +519,10 @@ function nextQuestion() {
   showQuestion();
 }
 
-function showLeaderboard(isFinal) {
-  const sorted = [...G.allPlayers].sort((a,b)=>(b.score||0)-(a.score||0));
-  const list = document.getElementById('lb-list');
+function renderLB(listId, players) {
+  const list = document.getElementById(listId);
   list.innerHTML = '';
+  const sorted = [...players].filter(p=>!p.isBot || (p.score||0)>0).sort((a,b)=>(b.score||0)-(a.score||0));
   sorted.forEach((p,i) => {
     const me = p.id === G.id;
     const row = document.createElement('div');
@@ -515,6 +531,22 @@ function showLeaderboard(isFinal) {
     row.innerHTML = `<div class="lb-rank">${i+1}</div><div class="lb-name">${p.name}${me?' <small style="opacity:.6">(tu)</small>':''}</div><div class="lb-score">${(p.score||0).toLocaleString()}</div>`;
     list.appendChild(row);
   });
+}
+
+function showLeaderboard(isFinal) {
+  // Fetch latest scores from Firebase before showing
+  if (window._fbReady) {
+    window._fbOnValue(window._fbRef(window._db,'quizconf/lobby'), snap => {
+      const data = snap.val() || {};
+      Object.entries(data).forEach(([id, fp]) => {
+        const existing = G.allPlayers.find(p => p.id === id);
+        if (existing) existing.score = fp.score || 0;
+      });
+      renderLB('lb-list', G.allPlayers);
+    }, { onlyOnce: true });
+  } else {
+    renderLB('lb-list', G.allPlayers);
+  }
   document.getElementById('lb-next').textContent = isFinal ? 'Fin' : 'Continuar';
   goTo('s-leaderboard');
 }
@@ -524,21 +556,27 @@ function continueAfterLB() {
 }
 
 function showFinal() {
-  const sorted = [...G.allPlayers].sort((a,b)=>(b.score||0)-(a.score||0));
-  const list = document.getElementById('final-list');
-  list.innerHTML = '';
-  sorted.forEach((p,i) => {
-    const me = p.id === G.id;
-    const row = document.createElement('div');
-    row.className = `lb-row${i===0?' r1':i===1?' r2':i===2?' r3':''}${me?' me':''}`;
-    row.style.animationDelay = (i*.1)+'s';
-    row.innerHTML = `<div class="lb-rank">${i+1}</div><div class="lb-name">${p.name}${me?' <small style="opacity:.6">(tu)</small>':''}</div><div class="lb-score">${(p.score||0).toLocaleString()}</div>`;
-    list.appendChild(row);
-  });
-  if (window._fbReady && G.id) {
-    try { window._fbRemove(window._fbRef(window._db, `quizconf/lobby/${G.id}`)); } catch(e){}
+  const doRender = () => {
+    renderLB('final-list', G.allPlayers);
+    if (window._fbReady && G.id) {
+      try { window._fbRemove(window._fbRef(window._db, `quizconf/lobby/${G.id}`)); } catch(e){}
+    }
+    goTo('s-final');
+  };
+  // Fetch final scores from Firebase
+  if (window._fbReady) {
+    window._fbOnValue(window._fbRef(window._db,'quizconf/lobby'), snap => {
+      const data = snap.val() || {};
+      Object.entries(data).forEach(([id, fp]) => {
+        const existing = G.allPlayers.find(p => p.id === id);
+        if (existing) existing.score = fp.score || 0;
+        else if (!id.startsWith('bot_')) G.allPlayers.push({ id, ...fp });
+      });
+      doRender();
+    }, { onlyOnce: true });
+  } else {
+    doRender();
   }
-  goTo('s-final');
 }
 
 function restartGame() {
