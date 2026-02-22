@@ -289,10 +289,6 @@ function goTo(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
-  // When going to name screen, wipe entire lobby so session starts fresh
-  if (id === 's-name' && window._fbReady) {
-    try { window._fbRemove(window._fbRef(window._db, 'quizconf/lobby')); } catch(e){}
-  }
 }
 
 /* ── JOIN ── */
