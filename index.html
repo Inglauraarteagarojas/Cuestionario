@@ -185,7 +185,7 @@
 <!-- HOME -->
 <div class="screen active" id="s-home">
   <div class="logo">QUIZCONF</div>
-  <button class="btn btn-primary" onclick="goTo('s-name')" style="font-size:20px;padding:18px 60px">Jugar</button>
+  <button class="btn btn-primary" onclick="newSession()" style="font-size:20px;padding:18px 60px">Jugar</button>
 </div>
 
 <!-- NAME -->
@@ -289,15 +289,33 @@ function goTo(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
+  // When going to name screen, wipe entire lobby so session starts fresh
+  if (id === 's-name' && window._fbReady) {
+    try { window._fbRemove(window._fbRef(window._db, 'quizconf/lobby')); } catch(e){}
+  }
 }
 
 /* ── JOIN ── */
+function newSession() {
+  // Wipe entire Firebase lobby before starting a new session
+  G.allPlayers = [];
+  G.botsAdded = false;
+  G.score = 0; G.streak = 0; G.currentQ = 0;
+  if (G.lobbyOff) { try { G.lobbyOff(); } catch(e){} G.lobbyOff = null; }
+  if (window._fbReady) {
+    try { window._fbRemove(window._fbRef(window._db, 'quizconf/lobby')); } catch(e){}
+  }
+  goTo('s-name');
+}
+
 function joinGame() {
   const name = document.getElementById('playerName').value.trim();
   if (!name) { document.getElementById('playerName').focus(); return; }
   G.name = name;
   G.id   = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
   G.score = 0; G.streak = 0; G.currentQ = 0; G.botsAdded = false;
+  // Stop any previous listener before creating new one
+  if (G.lobbyOff) { try { G.lobbyOff(); } catch(e){} G.lobbyOff = null; }
 
   if (window._fbReady) {
     fbJoin(name);
@@ -580,23 +598,18 @@ function showFinal() {
 }
 
 function restartGame() {
-  G.allPlayers = G.allPlayers.filter(p=>!p.isBot);
-  G.allPlayers.forEach(p => { p.score=0; p.streak=0; });
+  // Wipe entire lobby and start fresh
+  G.allPlayers = [];
   G.botsAdded = false;
-  // Re-register in Firebase lobby
-  if (window._fbReady && G.id) {
+  G.score = 0; G.streak = 0; G.currentQ = 0;
+  G.id = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  if (G.lobbyOff) { try { G.lobbyOff(); } catch(e){} G.lobbyOff = null; }
+  if (window._fbReady) {
     try {
-      window._fbSet(window._fbRef(window._db,`quizconf/lobby/${G.id}`), { name:G.name, score:0, streak:0, ts:Date.now() });
-      const ref = window._fbRef;
-      G.lobbyOff = window._fbOnValue(ref(window._db,'quizconf/lobby'), snap => {
-        const data = snap.val()||{};
-        G.allPlayers = Object.entries(data).map(([id,p])=>({id,...p})).sort((a,b)=>a.ts-b.ts);
-        renderLobby();
-      });
+      window._fbRemove(window._fbRef(window._db, 'quizconf/lobby'));
     } catch(e){}
   }
-  renderLobby();
-  goTo('s-lobby');
+  goTo('s-name');
 }
 
 // Handle delayed Firebase load
